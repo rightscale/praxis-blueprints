@@ -32,11 +32,11 @@ describe Praxis::Renderer do
         street: true,
         resident:  { name: true }
       },
-      prior_addresses: [{ name: true }],
+      prior_addresses: { name: true },
       work_address: true,
       alive: true,
       metadata: true,
-      aliases: [true]
+      aliases: true
     }
   end
 
@@ -45,57 +45,36 @@ describe Praxis::Renderer do
   subject(:output) { renderer.render(person, fields) }
 
   it 'renders existing attributes' do
-    output.keys.should match_array([:name, :full_name, :alive, :address, :prior_addresses, :metadata, :aliases])
+    expect(output.keys).to match_array([:name, :full_name, :alive, :address, :prior_addresses, :metadata, :aliases])
 
-    output[:name].should eq person.name
-    output[:full_name].should eq(first: person.full_name.first, last: person.full_name.last)
-    output[:alive].should be false
+    expect(output[:name]).to eq person.name
+    expect(output[:full_name]).to eq(first: person.full_name.first, last: person.full_name.last)
+    expect(output[:alive]).to be false
 
-    output[:address].should eq(state: person.address.state,
+    expect(output[:address]).to eq(state: person.address.state,
                                street: person.address.street,
                                resident: { name: person.address.resident.name })
 
     expected_prior_addresses = prior_addresses.collect { |addr| { name: addr.name } }
-    output[:prior_addresses].should match_array(expected_prior_addresses)
+    expect(output[:prior_addresses]).to match_array(expected_prior_addresses)
 
-    expected_aliases = aliases.collect(&:dump)
-    output[:aliases].should match_array(expected_aliases)
-
-    output[:metadata].should eq(metadata.dump)
+    expect(output[:aliases]).to match_array(aliases.collect(&:dump))
+    expect(output[:metadata]).to eq(metadata.dump)
   end
 
   context 'calls dump for non-Blueprint, but still Dumpable instances' do
     it 'when rendering them in full as array members' do
-      alias_one.should_receive(:dump).and_call_original
-      output[:aliases].first.should eq(first: alias_one.first, last: alias_one.last)
+      expect(alias_one).to receive(:dump).and_call_original
+      expect(output[:aliases].first).to eq(first: alias_one.first, last: alias_one.last)
     end
     it 'when rendering them in full as leaf object' do
-      metadata.should_receive(:dump).and_call_original
-      output[:metadata].should eq(metadata_hash)
+      expect(metadata).to receive(:dump).and_call_original
+      expect(output[:metadata]).to eq(metadata_hash)
     end
   end
 
   it 'does not render attributes with nil values' do
-    output.should_not have_key(:email)
-  end
-
-  it 'sends the correct ActiveSupport::Notification' do
-    fields = {
-      name: true,
-      email: true
-    }
-
-    notification_payload = {
-      blueprint: person,
-      view: nil,
-      fields: fields
-    }
-
-    ActiveSupport::Notifications.should_receive(:instrument)
-                                .with('praxis.blueprint.render', notification_payload)
-                                .and_call_original
-
-    renderer.render(person, fields)
+    expect(output).to_not have_key(:email)
   end
 
   context 'with include_nil: true' do
@@ -103,27 +82,16 @@ describe Praxis::Renderer do
     let(:address) { nil }
 
     it 'renders attributes with nil values' do
-      output.should have_key :email
-      output[:email].should be nil
+      expect(output).to have_key :email
+      expect(output[:email]).to be_nil
 
-      output.should have_key :work_address
-      output[:work_address].should be nil
+      expect(output).to have_key :work_address
+      expect(output[:work_address]).to be_nil
     end
 
     it 'renders nil directly for nil subobjects' do
-      output.should have_key :address
-      output[:address].should be nil
-    end
-  end
-
-  context '#render_collection' do
-    let(:people) { Array.new(10) { Person.example(address: address, email: nil) } }
-    subject(:output) { renderer.render_collection(people, fields) }
-
-    it { should have(10).items }
-
-    it 'renders the collection' do
-      output.first.should eq(renderer.render(people.first, fields))
+      expect(output).to have_key :address
+      expect(output[:address]).to be_nil
     end
   end
 
@@ -135,43 +103,33 @@ describe Praxis::Renderer do
 
     let(:matrix) { matrix_type.load(names.each_slice(3).collect { |slice| slice }) }
 
-    let(:fields) { [[{ name: true }]] }
+    let(:fields) { { name: true } }
 
     it 'renders with render_collection and per-element field spec' do
-      rendered = renderer.render_collection(matrix, fields.first)
-      rendered.flatten.collect { |r| r[:name] }.should eq((0..8).collect(&:to_s))
+      rendered = renderer.render(matrix, fields)
+      expect(rendered.flatten.collect { |r| r[:name] }).to eq((0..8).collect(&:to_s))
     end
 
     it 'renders with render and proper field spec' do
       rendered = renderer.render(matrix, fields)
-      rendered.flatten.collect { |r| r[:name] }.should eq((0..8).collect(&:to_s))
+      expect(rendered.flatten.collect { |r| r[:name] }).to eq((0..8).collect(&:to_s))
     end
   end
 
   context 'rendering stuff that breaks badly' do
     it 'does not break badly' do
-      renderer.render(person, {tags: [true]})
+      expect{renderer.render(person, {tags: true})}.to_not raise_error
     end
   end
 
   context 'caching rendered objects' do
-    let(:fields) { Praxis::FieldExpander.expand(Person, full_name: true) }
+    let(:fields) { {full_name: true} }
     it 'caches and returns identical results for the same field objects' do
       expect(person).to receive(:full_name).once.and_call_original
 
       render_1 = renderer.render(person, fields)
       render_2 = renderer.render(person, fields)
       expect(render_1).to be(render_2)
-    end
-  end
-
-  context 'circular rendering' do
-    it do
-      field_expander = Praxis::FieldExpander.new
-      fields = field_expander.expand(Person, true)
-
-      person.object.address.object.resident = person
-      expect { renderer.render(person, fields) }.to raise_error(Praxis::Renderer::CircularRenderingError)
     end
   end
 
@@ -198,7 +156,7 @@ describe Praxis::Renderer do
     let(:fields) do
       {
         id: true,
-        hash_collection: [true]
+        hash_collection: true
       }
     end
 

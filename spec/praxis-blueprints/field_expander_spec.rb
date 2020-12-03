@@ -3,142 +3,114 @@ require 'spec_helper'
 
 describe Praxis::FieldExpander do
   let(:field_expander) { Praxis::FieldExpander.new }
-
-  let(:view) do
-    Praxis::View.new(:testing, Person) do
-      attribute :name
-      attribute :full_name
-      attribute :parents do
-        attribute :father
-        attribute :mother
-      end
-      attribute :address, view: :extended
-      attribute :prior_addresses, view: :state
-      attribute :tags
-    end
+  let(:expanded_person_default_fieldset) do
+    # The only ones that are not already leaves is the full name, which can expand to first, last
+    Person.default_fieldset.merge!(full_name: {first: true, last: true})
+  end
+  let(:expanded_address_default_fieldset) do
+    # Address' default fieldset already has all attributes as leaves
+    Address.default_fieldset
   end
 
-  let(:full_expected) do
-    {
-      name: true,
-      full_name: { first: true, last: true },
-      parents: { mother: true, father: true },
-      address: {
-        state: true,
-        street: true,
-        resident: {
-          name: true,
-          full_name: { first: true, last: true },
-          address: { street: true, state: true },
-          prior_addresses: [{ street: true, state: true }]
-        }
-      },
-      prior_addresses: [{ state: true }],
-      tags: [true]
-    }
-  end
-
-  context 'expanding a view' do
-    it 'expands all fields on the view, subviews, and related attributes' do
-      field_expander.expand(view, true).should eq(full_expected)
+  context 'expanding attributes of a Person blueprint' do
+    it 'with fields=true, expands all fields on the default fieldset' do
+      expect(field_expander.expand(Person, true)).to eq(expanded_person_default_fieldset)
     end
 
     it 'expands for a subset of the direct fields' do
-      field_expander.expand(view, name: true).should eq(name: true)
+      expect(field_expander.expand(Person, name: true)).to eq(name: true)
     end
 
-    it 'expands for a subview' do
-      field_expander.expand(view, parents: true).should eq(parents: { mother: true, father: true })
+    it 'raises when trying to expand fields that do not exist in the type' do
+      expect do
+        field_expander.expand(Person, name: true, foobar: true)
+      end.to raise_error(/.*:foobar.*do not exist in Person/)
     end
 
-    it 'expands for a related attribute' do
-      field_expander.expand(view, address: true).should eq(address: full_expected[:address])
+    context 'given inlined struct attribtue' do
+      it 'expands for a sub-struct' do
+        expect(field_expander.expand(Person, parents: true)).to eq(parents: { mother: true, father: true })
+      end
+
+      it 'expands for a subset of a substruct' do
+        expect(field_expander.expand(Person, parents: { mother: true })).to eq(parents: { mother: true })
+      end
     end
 
-    it 'expands for a subset of a related attribute' do
-      field_expander.expand(view, address: { resident: true }).should eq(address: { resident: full_expected[:address][:resident] })
+    context 'given a non-inlined struct sub attribute' do
+      it 'expands a specific subattribute of a struct' do
+        expect(field_expander.expand(Person, full_name: { first: true })).to eq(full_name: { first: true })
+      end
+
+      it 'fully expands collections properly by simply listing subfields' do
+        expect(field_expander.expand(Person, prior_addresses: true)).to eq(prior_addresses: expanded_address_default_fieldset)
+      end
     end
 
-    it 'expands for a subset of a subview' do
-      field_expander.expand(view, parents: { mother: true }).should eq(parents: { mother: true })
+    context 'given a attribute that is also a blueprint' do
+      it 'expands to default fieldset for an attribute that is also blueprint' do
+        expect(field_expander.expand(Person, address: true)).to eq(address: expanded_address_default_fieldset)
+      end
+
+      it 'expands to default fieldset for a subset of fields of an attribute that is a blueprint' do
+        expect(field_expander.expand(Person, address: { resident: true })).to eq(address: { resident: expanded_person_default_fieldset })
+      end
     end
 
-    it 'ignores fields not defined in the view' do
-      field_expander.expand(view, name: true, age: true).should eq(name: true)
+    context 'collection attributes' do
+      it 'expands subfields by simply listing subfields the same as structs/blueprints' do
+        expect(field_expander.expand(Person, prior_addresses: { state: true })).to eq(prior_addresses: { state: true })
+      end
     end
-
-    it 'expands a specific subattribute of a struct' do
-      field_expander.expand(view, full_name: { first: true }).should eq(full_name: { first: true })
-    end
-
-    it 'wraps expanded collections in arrays' do
-      field_expander.expand(view, prior_addresses: { state: true }).should eq(prior_addresses: [{ state: true }])
-    end
-
-    it 'wraps expanded collections in arrays' do
-      field_expander.expand(view, prior_addresses: true).should eq(prior_addresses: [{ state: true }])
-    end
-  end
-
-  it 'expands for an Attributor::Model' do
-    field_expander.expand(FullName).should eq(first: true, last: true)
-  end
-
-  it 'expands for a Blueprint' do
-    field_expander.expand(Person, parents: true).should eq(parents: { father: true, mother: true })
-  end
-
-  it 'expands for an Attributor::Collection of an Attrbutor::Model' do
-    expected = [{ first: true, last: true }]
-    field_expander.expand(Attributor::Collection.of(FullName)).should eq expected
-  end
-
-  it 'expands for an Attributor::Collection of a Blueprint' do
-    expected = [{ name: true, resident: { full_name: { first: true, last: true } } }]
-
-    field_expander.expand(Attributor::Collection.of(Address), name: true, resident: { full_name: true }).should eq expected
-  end
-
-  it 'also expands array-wrapped field hashes for collections' do
-    expected = [{ name: true, resident: { full_name: { first: true, last: true } } }]
-    field_expander.expand(Attributor::Collection.of(Address), [name: true, resident: { full_name: true }]).should eq expected
-  end
-
-  it 'expands for an Attributor::Collection of a primitive type' do
-    field_expander.expand(Attributor::Collection.of(String)).should eq([true])
   end
 
   it 'expands for for a primitive type' do
-    field_expander.expand(String).should eq(true)
+    expect(field_expander.expand(String)).to eq(true)
+  end
+
+  it 'expands for an Attributor::Model' do
+    expect(field_expander.expand(FullName)).to eq(first: true, last: true)
+  end
+
+  it 'expands for a Blueprint' do
+    expect(field_expander.expand(Person, parents: true)).to eq(parents: { father: true, mother: true })
+  end
+
+  it 'expands for an Attributor::Collection of an Attrbutor::Model' do
+    expect(field_expander.expand(Attributor::Collection.of(FullName))).to eq(first: true, last: true)
+  end
+
+  it 'expands for an Attributor::Collection of a Blueprint' do
+    expected = { name: true, resident: { full_name: { first: true, last: true } } }
+    expect(field_expander.expand(Attributor::Collection.of(Address), name: true, resident: { full_name: true })).to eq(expected)
+  end
+
+  it 'also expands array-wrapped field hashes for collections' do
+    expected = { name: true, resident: { full_name: { first: true, last: true } } }
+    expect(field_expander.expand(Attributor::Collection.of(Address), name: true, resident: { full_name: true })).to eq(expected)
+  end
+
+  it 'expands for an Attributor::Collection of a primitive type' do
+    expect(field_expander.expand(Attributor::Collection.of(String))).to eq(true)
   end
 
   context 'expanding a two-dimensional collection' do
-    let(:matrix_type) do
-      Attributor::Collection.of(Attributor::Collection.of(FullName))
-    end
-
-    it 'expands the fields with proper nesting' do
-      field_expander.expand(matrix_type).should eq([[first: true, last: true]])
+    it 'expands the fields discarding the collection nexting nesting' do
+      matrix_type =  Attributor::Collection.of(Attributor::Collection.of(FullName))
+      expect(field_expander.expand(matrix_type)).to eq(first: true, last: true)
     end
   end
 
   context 'circular expansions' do
     it 'preserve field object identity for circular references' do
-      result = field_expander.expand(Address, true)
-      result.should be result[:resident][:address]
+      result = field_expander.expand(Person, address: {resident: true}, work_address: {resident: true})
+      expect(result[:address][:resident]).to be(result[:work_address][:resident])
     end
 
     context 'with collections of Blueprints' do
       it 'still preserves object identity' do
-        result = field_expander.expand(Person, prior_addresses: true)[:prior_addresses][0]
-        result.should be result[:resident][:prior_addresses][0]
-      end
-    end
-
-    context 'for views' do
-      it 'still preserves object identity' do
-        result = field_expander.expand(Person.views[:circular], true)
-        result[:address][:resident].should be result
+        result = field_expander.expand(Person, address: {resident: true}, prior_addresses: {resident: true})
+        expect(result[:address][:resident]).to be(result[:prior_addresses][:resident])
       end
     end
   end
@@ -171,7 +143,7 @@ describe Praxis::FieldExpander do
         keyed_hash: { foo: true, bar: true },
         some_struct: { something: true }
       }
-      field_expander.expand(type, true).should eq(expected)
+      expect(field_expander.expand(type, true)).to eq(expected)
     end
   end
 end

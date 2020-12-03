@@ -26,38 +26,16 @@ class Person < Praxis::Blueprint
     attribute :metadata, Attributor::Hash
   end
 
-  view :default do
+  default_fieldset do
     attribute :name
     attribute :full_name
-    attribute :address
-    attribute :prior_addresses
-  end
-
-  view :circular do
-    attribute :address, view: :circular
-  end
-
-  view :self_referencing do
-    attribute :myself, view: :self_referencing
-    attribute :friends, view: :self_referencing
-  end
-
-  view :current do
-    attribute :name
-    attribute :full_name
-    attribute :address
-  end
-
-  view :name_only do
-    attribute :name
-  end
-
-  view :extended do
-    attribute :name
-    attribute :full_name
-    attribute :age
-    attribute :address
-    attribute :alive
+    attribute :address do
+      attribute :name
+      attribute :street
+    end
+    attribute :prior_addresses do
+      attribute :name
+    end
   end
 end
 
@@ -69,24 +47,6 @@ class Address < Praxis::Blueprint
     attribute :state, String, values: %w(OR CA)
 
     attribute :resident, Person, example: proc { |address, context| Person.example(context, address: address) }
-  end
-
-  view :default do
-    attribute :street
-    attribute :state
-  end
-
-  view :circular do
-    attribute :resident, view: :circular
-  end
-  view :state do
-    attribute :state
-  end
-
-  view :extended do
-    attribute :state
-    attribute :street
-    attribute :resident
   end
 end
 

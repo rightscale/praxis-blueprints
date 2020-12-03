@@ -11,22 +11,20 @@ describe Praxis::Blueprint do
       person_1 = Person.example('person 1')
       person_2 = Person.example('person 1')
 
-      person_1.name.should eq(person_2.name)
-      person_1.address.name.should eq(person_2.address.name)
+      expect(person_1.name).to eq(person_2.name)
+      expect(person_1.address.name).to eq(person_2.address.name)
     end
   end
 
-  context 'implicit master view' do
-    subject(:master_view) { Person.view(:master) }
+  context 'implicit default_fieldset (when not defined in the blueprint)' do
+    subject(:default_fieldset) { Address.default_fieldset }
 
     it { should_not be(nil) }
     it 'contains all attributes' do
-      master_view.contents.keys.should =~ Person.attributes.keys
-    end
-
-    it 'uses :master view for rendering blueprint sub-attributes' do
-      subview = master_view.contents[:address]
-      subview.should be Address.views[:default]
+      simple_attributes = [:id, :name, :street, :state]
+      expect(default_fieldset.keys).to match_array(simple_attributes)
+      # Should not have blueprint-derived attributes (or collections of them)
+      expect(default_fieldset.keys).to_not include( Address.attributes.keys - simple_attributes )
     end
   end
 
@@ -45,7 +43,7 @@ describe Praxis::Blueprint do
 
     context '.finalize on Praxis::Blueprint' do
       before do
-        blueprint_class.should_receive(:_finalize!).and_call_original
+        expect(blueprint_class).to receive(:_finalize!).and_call_original
         Praxis::Blueprint.finalize!
       end
 
@@ -54,7 +52,7 @@ describe Praxis::Blueprint do
 
     context '.finalize on that subclass' do
       before do
-        blueprint_class.should_receive(:_finalize!).and_call_original
+        expect(blueprint_class).to receive(:_finalize!).and_call_original
         blueprint_class.finalize!
       end
 
@@ -68,35 +66,28 @@ describe Praxis::Blueprint do
     end
 
     it 'skips attribute definition' do
-      blueprint_class.should_receive(:_finalize!).and_call_original
-      blueprint_class.should_not_receive(:define_attribute)
+      expect(blueprint_class).to receive(:_finalize!).and_call_original
+      expect(blueprint_class).to_not receive(:define_attribute)
       blueprint_class.finalize!
-      blueprint_class.finalized?.should be(true)
+      expect(blueprint_class.finalized?).to be(true)
     end
   end
 
   it 'has an inner Struct class for the attributes' do
-    blueprint_class.attribute.type.should be blueprint_class::Struct
+    expect(blueprint_class.attribute.type).to be blueprint_class::Struct
   end
 
-  context '.views' do
-    it { blueprint_class.should respond_to(:views) }
-    it 'sorta has view objects' do
-      blueprint_class.views.should have_key(:default)
-    end
-  end
 
   context 'an instance' do
     shared_examples 'a blueprint instance' do
       let(:expected_name) { blueprint_instance.name }
 
       context '#render' do
-        let(:view) { :default }
-        subject(:output) { blueprint_instance.render(view: view) }
+        subject(:output) { blueprint_instance.render }
 
         it { should have_key(:name) }
         it 'has the right values' do
-          subject[:name].should eq(expected_name)
+          expect(subject[:name]).to eq(expected_name)
         end
       end
 
@@ -154,95 +145,15 @@ describe Praxis::Blueprint do
           end
 
           it 'uses the cache to memoize instance creation' do
-            additional_instance.should be(additional_instance)
-            blueprint_class.cache.should have_key(resource)
-            blueprint_class.cache[resource].should be(blueprint_instance)
+            expect(additional_instance).to be(additional_instance)
+            expect(blueprint_class.cache).to have_key(resource)
+            expect(blueprint_class.cache[resource]).to be(blueprint_instance)
           end
         end
 
         context 'with caching disabled' do
           it { should_not be blueprint_instance }
         end
-      end
-    end
-  end
-
-  context '.describe' do
-    let(:shallow) { false }
-    let(:example_object) { nil }
-
-    before do
-      expect(blueprint_class.attribute.type).to receive(:describe).with(shallow, example: example_object).ordered.and_call_original
-    end
-
-    context 'for non-shallow descriptions' do
-      before do
-        # Describing a Person also describes the :myself and :friends attributes. They are both a Person and a Coll of Person.
-        # This means that Person type `describe` is called two more times, thes times with shallow=true
-        expect(blueprint_class.attribute.type).to receive(:describe).with(true, example: example_object).twice.and_call_original
-      end
-
-      subject(:output) { blueprint_class.describe }
-
-      its([:name]) { should eq(blueprint_class.name) }
-      its([:id]) { should eq(blueprint_class.id) }
-      its([:views]) { should be_kind_of(Hash) }
-      its(:keys) { should_not include(:anonymous) }
-      it 'should contain the an entry for each view' do
-        subject[:views].keys.should include(:default, :current, :extended, :master)
-      end
-    end
-
-    context 'for shallow descriptions' do
-      let(:shallow) { true }
-
-      it 'should not include views' do
-        blueprint_class.describe(true).key?(:views).should be(false)
-      end
-      context 'for anonymous blueprints' do
-        let(:blueprint_class) do
-          klass = Class.new(Praxis::Blueprint) do
-            anonymous_type
-            attributes do
-              attribute :name, String
-            end
-          end
-          klass.finalize!
-          klass
-        end
-        it 'reports their anonymous-ness' do
-          description = blueprint_class.describe(true)
-          expect(description).to have_key(:anonymous)
-          expect(description[:anonymous]).to be(true)
-        end
-      end
-    end
-
-    context 'with an example' do
-      let(:example) { blueprint_class.example }
-      let(:example_object) { example.object }
-      let(:shallow) { false }
-
-      subject(:output) { blueprint_class.describe(false, example: example) }
-      before do
-        # Describing a Person also describes the :myself and :friends attributes. They are both a Person and a Coll of Person.
-        # This means that Person type `describe` is called two more times, thes times with shallow=true
-        expect(blueprint_class.attribute.type).to receive(:describe)
-          .with(true, example: an_instance_of(blueprint_class.attribute.type)).twice.and_call_original
-      end
-
-      it 'outputs examples for leaf values using the provided example' do
-        output[:attributes][:name][:example].should eq example.name
-        output[:attributes][:age][:example].should eq example.age
-
-        output[:attributes][:aliases].should have_key(:example)
-        output[:attributes][:aliases][:example].should eq example.aliases.dump
-
-        output[:attributes][:full_name].should_not have_key(:example)
-
-        parents_attributes = output[:attributes][:parents][:type][:attributes]
-        parents_attributes[:father][:example].should eq example.parents.father
-        parents_attributes[:mother][:example].should eq example.parents.mother
       end
     end
   end
@@ -296,47 +207,6 @@ describe Praxis::Blueprint do
     end
   end
 
-  context 'decorators' do
-    let(:name) { 'Soren II' }
-
-    let(:object) { Person.example.object }
-    subject(:person) { Person.new(object, decorators) }
-
-    context 'as a hash' do
-      let(:decorators) { { name: name } }
-      it do
-        person.name.should eq('Soren II')
-      end
-
-      its(:name) { should be(name) }
-
-      context 'an additional instance with the equivalent hash' do
-        subject(:additional_person) { Person.new(object, name: name) }
-        it { should_not be person }
-      end
-
-      context 'an additional instance with the same hash object' do
-        subject(:additional_person) { Person.new(object, decorators) }
-        it { should_not be person }
-      end
-
-      context 'an instance of the same object without decorators' do
-        subject(:additional_person) { Person.new(object) }
-        it { should_not be person }
-      end
-    end
-
-    context 'as an object' do
-      let(:decorators) { double('decorators', name: name) }
-      its(:name) { should be(name) }
-
-      context 'an additional instance with the same object' do
-        subject(:additional_person) { Person.new(object, decorators) }
-        it { should_not be person }
-      end
-    end
-  end
-
   context 'with a provided :reference option on attributes' do
     context 'that does not match the value set on the class' do
       subject(:mismatched_reference) do
@@ -349,7 +219,7 @@ describe Praxis::Blueprint do
       it 'should raise an error' do
         expect do
           mismatched_reference.attributes
-        end.to raise_error
+        end.to raise_error(/Reference mismatch/)
       end
     end
   end
@@ -366,30 +236,55 @@ describe Praxis::Blueprint do
     let(:person) { Person.example('1') }
     it 'is an alias to dump' do
       person.object.contents
-      rendered = Person.render(person, view: :default)
-      dumped = Person.dump(person, view: :default)
+      rendered = Person.render(person, fields: [:name, :full_name])
+      dumped = Person.dump(person, fields: [:name, :full_name])
       expect(rendered).to eq(dumped)
     end
   end
 
   context '#render' do
     let(:person) { Person.example }
-    let(:view_name) { :default }
+    let(:fields) do 
+      {
+        name: true,
+        full_name: true,
+        address: {
+          street: true,
+          state: true,
+        },
+        prior_addresses: {
+          street: true,
+          state: true,
+        }
+      }
+    end
     let(:render_opts) { {} }
-    subject(:output) { person.render(view: view_name, **render_opts) }
+    subject(:output) { person.render(fields: fields, **render_opts) }
 
+    context 'without passing fields' do
+      it 'renders the default field set defined' do 
+        rendered = person.render( **render_opts)
+        default_top_fields = Person.default_fieldset.keys
+        expect(rendered.keys).to match_array(default_top_fields)
+        expect(default_top_fields).to match_array([
+          :name,
+          :full_name,
+          :address,
+          :prior_addresses])
+      end
+    end
     context 'with a sub-attribute that is a blueprint' do
       it { should have_key(:name) }
       it { should have_key(:address) }
       it 'renders the sub-attribute correctly' do
-        output[:address].should have_key(:street)
-        output[:address].should have_key(:state)
+        expect(output[:address]).to have_key(:street)
+        expect(output[:address]).to have_key(:state)
       end
 
       it 'reports a dump error with the appropriate context' do
-        person.address.should_receive(:state).and_raise('Kaboom')
+        expect(person.address).to receive(:state).and_raise('Kaboom')
         expect do
-          person.render(view: view_name, context: ['special_root'])
+          person.render(fields: fields, context: ['special_root'])
         end.to raise_error(/Error while dumping attribute state of type Address for context special_root.address. Reason: .*Kaboom/)
       end
     end
@@ -397,9 +292,9 @@ describe Praxis::Blueprint do
     context 'with sub-attribute that is an Attributor::Model' do
       it { should have_key(:full_name) }
       it 'renders the model correctly' do
-        output[:full_name].should be_kind_of(Hash)
-        output[:full_name].should have_key(:first)
-        output[:full_name].should have_key(:last)
+        expect(output[:full_name]).to be_kind_of(Hash)
+        expect(output[:full_name]).to have_key(:first)
+        expect(output[:full_name]).to have_key(:last)
       end
     end
 
@@ -407,31 +302,72 @@ describe Praxis::Blueprint do
       context 'as a hash' do
         subject(:output) { person.render(fields: { address: { state: true } }) }
         it 'should only have the address rendered' do
-          output.keys.should eq [:address]
+          expect(output.keys).to eq [:address]
         end
         it 'address should only have state' do
-          output[:address].keys.should eq [:state]
+          expect(output[:address].keys).to eq [:state]
         end
       end
       context 'as a simple array' do
         subject(:output) { person.render(fields: [:full_name]) }
         it 'accepts it as the list of top-level attributes to be rendered' do
-          output.keys.should == [:full_name]
+          expect(output.keys).to match_array([:full_name])
         end
       end
+    end
+
+    context 'using un-expanded fields for blueprints' do
+      let(:fields) do 
+        {
+          name: true,
+          address: true, # A blueprint!
+        }
+      end
+      it 'should still render the blueprint sub-attribute with its default fieldset' do
+        address_default_top_fieldset = Address.default_fieldset.keys
+        expect(output[:address].keys).to match(address_default_top_fieldset)
+      end
+
     end
   end
 
   context '.as_json_schema' do
     it 'delegates to the attribute type' do
-      Person.attribute.type.should receive(:as_json_schema)
+      expect(Person.attribute.type).to receive(:as_json_schema)
       Person.as_json_schema
     end
   end
   context '.json_schema_type' do
     it 'delegates to the attribute type' do
-      Person.attribute.type.should receive(:json_schema_type)
+      expect(Person.attribute.type).to receive(:json_schema_type)
       Person.json_schema_type
+    end
+  end
+
+  context 'FieldsetParser' do
+    let(:definition_block) do
+      Proc.new do
+        attribute :one
+        attribute :two do
+          attribute :sub_two
+        end
+      end
+    end
+    subject { described_class::FieldsetParser.new(&definition_block) }
+
+    it 'parses properly' do
+      expect(subject.fieldset).to eq(one: true, two: { sub_two: true} )
+    end
+
+    context 'with attribute parameters' do
+      let(:definition_block) do
+        Proc.new do
+          attribute :one, view: :other
+        end
+      end
+      it 'complains and gives instructions if legacy view :default' do
+        expect{ subject.fieldset }.to raise_error(/Default fieldset definitions do not accept parameters/)
+      end
     end
   end
 end
